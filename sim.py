@@ -25,6 +25,7 @@ class Link:
 
 class Node:
    def __init__( self, name, state=None, links=None, behavior=None ):
+      'behavior is normal code running in runActivities, and can set `remaining`'
       self.name = name
       # links are outgoing
       self.state = state or {}
@@ -37,8 +38,9 @@ class Node:
       pass
 
    def runActivities( self ):
-      eval( self.behavior )
-      return 0
+      remaining = False
+      exec( self.behavior )
+      return remaining
 
    def hasActivities( self ):
       return False
@@ -49,15 +51,19 @@ class Topology:
       # key links by [ source ][ sink ]
       self.links = {}
 
+   def addNode( self, name, behavior=None ):
+      self.nodes[ name ] = Node( name, behavior=behavior )
+
    def step( self ):
       for n in cycle( self.nodes.values() ):
          yield n.runActivities()
 
 if __name__ == "__main__":
    top = Topology()
-   top.nodes[ 1 ] = Node( 1 )
+   top.addNode( 1, behavior='print(self.name)' )
    loop = top.step()
-   # start in step mode
+
+   # simple pdb-like interface
    cmd = ''
    lastCmd = ''
    while cmd not in ( 'exit', 'quit', 'q' ):
