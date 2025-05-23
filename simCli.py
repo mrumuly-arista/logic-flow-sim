@@ -135,7 +135,6 @@ class SimShell( Cmd ):
                return
             behaviorName = tokens[ 3 ]
             top.setNodeBehavior( name, behaviorName )
-            pass
          else:
             print( "unknown topology node NAME command" )
       elif tokens[ 0 ] in ( 'l', 'link' ):
