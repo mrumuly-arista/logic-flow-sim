@@ -258,12 +258,12 @@ class MainWindow(QWidget):
             self._align_ui_nodes()
             print(f"Removed UI item and requested removal of sim node: {ui_node_item.name}")
     
-    def add_ui_link(self, sim_link_name, sim_link_obj, parent1_name, parent2_name):
-        if parent1_name not in self.ui_nodes or parent2_name not in self.ui_nodes:
-            self._controller.log_message(f"Cannot add link '{sim_link_name}': one or both nodes '{parent1_name}', '{parent2_name}' do not exist.")
+    def add_ui_link(self, sim_link_name, sim_link_obj, peer1_name, peer2_name):
+        if peer1_name not in self.ui_nodes or peer2_name not in self.ui_nodes:
+            self._controller.log_message(f"Cannot add link '{sim_link_name}': one or both nodes '{peer1_name}', '{peer2_name}' do not exist.")
             return
-        parent1 = self.ui_nodes[parent1_name]
-        parent2 = self.ui_nodes[parent2_name]
+        parent1 = self.ui_nodes[peer1_name]
+        parent2 = self.ui_nodes[peer2_name]
         new_ui_link = UILink(self, sim_link_name, parent1, parent2)
         new_ui_link.set_sim_link_ref(sim_link_obj) # Link to the simulation node
 
@@ -330,10 +330,17 @@ class Controller(QObject):
     def _initialize_simulation(self):
         self.log_message("Initializing example topology...")
         
-        self.add_sim_node("c")
-        self.add_sim_node("a")
-        self.add_sim_node("b")
-        self.add_sim_link("link1" , "a", "b")
+        behavior = '\n'.join( [
+            'if not self.state[ "initialized" ]:',
+            '   self.send( next( iter( self.txIntfs ) ), "hello wolrd" )',
+            '   self.state[ "initialized" ] = True',
+            'elif self.rxWaiting:',
+            '   print( f"{self.name} got {self.recv()}" )',
+            'self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )',
+        ] )
+        self.add_sim_node( "a", behavior=behavior, state={ 'initialized': False } )
+        self.add_sim_node( "b", behavior=behavior, state={ 'initialized': False } )
+        self.add_sim_link( "link1", "a", "b" )
 
         self.simulation_loop = self.topology.step()
         self.log_message("Topo initialized.")
@@ -345,18 +352,11 @@ class Controller(QObject):
         self.simulation_loop = None
         self._initialize_simulation()
 
-    def add_sim_node(self, name, behavior="print(self.name)"):
+    def add_sim_node(self, name, behavior="print(self.name)", state = {}):
         if name in self.topology.nodes:
             self.log_message(f"Node '{name}' already exists.")
             return
-        behavior='\n'.join( [
-        'print(self.name)',
-        'self.state["power"] = True',
-        'self.state["halted"] = True',
-        'remaining = True',
-    ] )
-
-        sim_node = self.topology.addNode(name, behavior=behavior)
+        sim_node = self.topology.addNode(name, behavior=behavior, state=state)
 
         self.main_window.add_ui_node(name, sim_node)
         self.log_message(f"Added node '{name}'.")
@@ -368,14 +368,14 @@ class Controller(QObject):
         else:
             self.log_message(f"Node '{name}' not found.")
 
-    def add_sim_link(self, name, parent1_name, parent2_name):
+    def add_sim_link(self, name, peer1_name, peer2_name):
         if name in self.topology.links:
             self.log_message(f"Link '{name}' already exists.")
             return
 
-        sim_link = None # self.topology.addLink(name)
+        sim_link = self.topology.addLink(peer1_name, peer2_name)
 
-        self.main_window.add_ui_link(name, sim_link, parent1_name, parent2_name)
+        self.main_window.add_ui_link(name, sim_link, peer1_name, peer2_name)
         self.log_message(f"Added link '{name}'.")
 
     def remove_sim_link(self, name):
