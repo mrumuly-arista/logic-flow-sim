@@ -99,7 +99,7 @@ class Topology:
          'behaviors': self.behaviors,
          'nodes': { k: { 
             'state': n[ 'state' ],
-            'behaviorName': self.nodeBehavior[ k ] }
+            'behaviorName': self.nodeBehavior.get( k, '' ) }
             for k, n in nodes.items() },
          'links': {},
       }
@@ -124,6 +124,17 @@ class Topology:
       # give node a chance to initialize any awaiting actions
       self.waiting.add( name )
       return new_node
+
+   def delNode( self, name ):
+      if name not in self.nodes:
+         # make idempotent
+         return
+      del self.nodes[ name ]
+      # delete all related links
+      del self.links[ name ]
+      for linkList in self.links.values():
+         if name in linkList:
+            del linkList[ name ]
 
    def addLink( self, peerA, peerB, maxDepth=0 ):
       assert peerB not in self.links[ peerA ], 'duplicate link'

@@ -65,6 +65,9 @@ class SimShell( Cmd ):
    def do_show( self, arg ):
       'alias: print'
       self.do_print( arg )
+   def do_sh( self, arg ):
+      'alias: print'
+      self.do_print( arg )
 
    def do_file( self, arg ):
       'Perform file operations: "file load PATH", "file dump PATH"'
@@ -77,8 +80,11 @@ class SimShell( Cmd ):
       path = " ".join( tokens[ 1: ] )
       if tokens[ 0 ] in ( 'l', 'load' ):
          global top, loop
-         top = loadTopologyFile( path )
-         loop = top.step()
+         try:
+            top = loadTopologyFile( path )
+            loop = top.step()
+         except FileNotFoundError:
+            print( "file not found" )
       elif tokens[ 0 ] in ( 'd', 'dump' ):
          dumpTopologyFile( top, path )
    def do_f( self, arg ):
@@ -114,17 +120,22 @@ class SimShell( Cmd ):
          name = tokens[ 1 ]
          op = tokens[ 2 ]
          if op in ( 'a', 'add' ):
-            pass
-         elif op in ( 'r', 'remove', 'd', 'delete' ):
-            pass
+            # TODO: optional [BEHAVIOR] [STATE]
+            top.addNode( name )
+         elif op in ( 'r', 'remove', 'd', 'del', 'delete' ):
+            top.delNode( name )
          elif op in ( 's', 'state' ):
             pass
          elif op in ( 'b', 'behavior' ):
             pass
+         else:
+            print( "unknown topology node NAME command" )
       elif tokens[ 0 ] in ( 'l', 'link' ):
          pass
       elif tokens[ 0 ] in ( 'b', 'behavior' ):
          pass
+      else:
+         print( "unknown topology command" )
 
    def do_t( self, arg ):
       'alias: topology'
