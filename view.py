@@ -6,10 +6,12 @@ import math
 from sim import Topology, Node as SimNode, Link as SimLink
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QBrush, QPainter, QPen
+from PyQt5.QtGui import QColor, QPen, QBrush, QPainterPath, QPainterPathStroker
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QGraphicsEllipseItem,
+    QGraphicsLineItem,
     QGraphicsTextItem,
     QGraphicsItem,
     QGraphicsScene,
@@ -74,10 +76,40 @@ class ToolTipWindow(QMainWindow):
             self.delete_item_from_scene.emit(self.parent_item)
             self.close()
 
-class UILink(QGraphicsItem):
+class UILink(QGraphicsLineItem):
     """
     Each link will be a line. Hopefully a bold enough line to be easily clickable but well see
     """
+    def __init__(self, parent, name, start_node, end_node):
+        super().__init__()
+        self.name = name
+        self.parent = parent
+        self.start_node = start_node
+        self.end_node = end_node
+        self.sim_link_ref = None
+
+        self.setPen(QPen(QColor(100, 0, 0), 5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        self.setZValue(-1)
+
+        self.start_node.connected_lines.append(self)
+        self.end_node.connected_lines.append(self)
+        
+        self.updatePosition() # Set initial position
+    
+    def set_sim_link_ref(self, link_ref):
+        self.sim_link_ref = link_ref
+
+    def updatePosition(self):
+        if self.start_node and self.end_node:
+            self.setLine(self.start_node.center_point().x(), self.start_node.center_point().y(),
+                         self.end_node.center_point().x(), self.end_node.center_point().y())
+
+    def mousePressEvent(self, event):
+        print(f"Link chosen between {self.start_node.name} and {self.end_node.name}")
+        # You can emit a signal here or perform other actions
+        self.setPen(QPen(QColor(100, 10, 0), 10, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        self.update()
+        super().mousePressEvent(event)
 
 class UINode(QGraphicsEllipseItem):
     """
@@ -85,11 +117,12 @@ class UINode(QGraphicsEllipseItem):
     It holds a reference to its corresponding simulation node.
     """
     def __init__(self, parent, sim_node_name="default0", x=0, y=0, size = 100):
-        super().__init__(-size/2, -size/2, size/2, size/2)
+        super().__init__(-size/2, -size/2, size, size)
         self.name = sim_node_name
         self.parent = parent
         self._sim_node_ref = None
         self.detail_window = None
+        self.connected_lines = []
 
         fill_color = Qt.gray
         outline_color = Qt.black
@@ -99,14 +132,17 @@ class UINode(QGraphicsEllipseItem):
         self.setBrush(QBrush(fill_color))
         self.setPen(pen)
         self.setPos(x,y)
-        self.setFlag(QGraphicsItem.ItemIsMovable)
+        # self.setFlag(QGraphicsItem.ItemIsMovable) # removed dragging for now
         self.setFlag(QGraphicsItem.ItemIsSelectable)
 
         self.text_item = QGraphicsTextItem(self.name, self)
         self._center_text()
-    
+
     def set_sim_node_ref(self, sim_ref):
         self._sim_node_ref = sim_ref
+
+    def center_point(self):
+        return self.scenePos() + self.boundingRect().center()
 
     def update_ui_from_sim_state(self):
         """Updates the UI node's visual representation based on its sim node's state."""
@@ -149,9 +185,10 @@ class MainWindow(QWidget):
         # Config
         self.scene = QGraphicsScene(0, 0, 500, 500)
         self.ui_nodes = {} # Dictionary to map sim_node_name to UINode object
+        self.ui_links = {} # ditto
 
         self.setWindowTitle("Simulation GUI")
-        self.setGeometry(100, 100, 1000, 700) # Increased window size
+        self.setGeometry(100, 100, 1000, 700)
 
         # Output Log for Controller messages
         self.output_log = QTextEdit()
@@ -159,7 +196,6 @@ class MainWindow(QWidget):
 
         # MENU CONTROL WIDGETS
         vbox_controls = QVBoxLayout()
-
         addNode_button = QPushButton("Add Sim Node")
         addNode_button.clicked.connect(self._add_sim_node_from_gui)
         vbox_controls.addWidget(addNode_button)
@@ -180,6 +216,7 @@ class MainWindow(QWidget):
 
         view = QGraphicsView(self.scene)
         view.setRenderHint(QPainter.Antialiasing)
+        view.setMouseTracking(True)
 
         hbox = QHBoxLayout(self)
         hbox.addLayout(vbox_controls)
@@ -197,35 +234,61 @@ class MainWindow(QWidget):
         self._controller.add_sim_node(node_name)
 
     def add_ui_node(self, sim_node_name, sim_node_obj):
-        """
-        Creates and adds a UINode to the scene, linking it to the sim.Node object.
-        Called by the Controller when a new sim node is created.
-        """
         new_ui_node = UINode(self, sim_node_name)
         new_ui_node.set_sim_node_ref(sim_node_obj) # Link to the simulation node
+
         self.ui_nodes[sim_node_name] = new_ui_node
         self.scene.addItem(new_ui_node)
         self._align_ui_nodes()
 
     def update_ui_nodes(self):
-        """
-        aligns ui nodes to sim nodes
-        """
         for ui_node in self.ui_nodes.values():
             ui_node.update_ui_from_sim_state()
         self.scene.update()
 
     def remove_ui_node(self, ui_node_item: UINode):
-        """
-        chop the ui and sim nodes
-        """
         if ui_node_item and ui_node_item.scene() == self.scene:
+            for link in list(ui_node_item.connected_lines): 
+                self.remove_ui_link(link)
+
             self.scene.removeItem(ui_node_item)
             if ui_node_item.name in self.ui_nodes:
                 del self.ui_nodes[ui_node_item.name]
                 self._controller.remove_sim_node(ui_node_item.name)
             self._align_ui_nodes()
             print(f"Removed UI item and requested removal of sim node: {ui_node_item.name}")
+    
+    def add_ui_link(self, sim_link_name, sim_link_obj, peer1_name, peer2_name):
+        if peer1_name not in self.ui_nodes or peer2_name not in self.ui_nodes:
+            self._controller.log_message(f"Cannot add link '{sim_link_name}': one or both nodes '{peer1_name}', '{peer2_name}' do not exist.")
+            return
+        parent1 = self.ui_nodes[peer1_name]
+        parent2 = self.ui_nodes[peer2_name]
+        new_ui_link = UILink(self, sim_link_name, parent1, parent2)
+        new_ui_link.set_sim_link_ref(sim_link_obj) # Link to the simulation node
+
+        self.ui_links[sim_link_name] = new_ui_link
+        self.scene.addItem(new_ui_link)
+        self._align_ui_nodes()
+
+    def update_ui_links(self):
+        for ui_link in self.ui_links.values():
+            ui_link.updatePosition()
+        self.scene.update()
+
+    def remove_ui_link(self, ui_link_item: UILink):
+        if ui_link_item and ui_link_item.scene() == self.scene:
+            if ui_link_item.start_node and ui_link_item in ui_link_item.start_node.connected_lines:
+                ui_link_item.start_node.connected_lines.remove(ui_link_item)
+            if ui_link_item.end_node and ui_link_item in ui_link_item.end_node.connected_lines:
+                ui_link_item.end_node.connected_lines.remove(ui_link_item)
+
+            self.scene.removeItem(ui_link_item)
+            if ui_link_item.name in self.ui_links:
+                del self.ui_links[ui_link_item.name]
+                self._controller.remove_sim_link(ui_link_item.name)
+            print(f"Removed UI item and requested removal of sim link: {ui_link_item.name}")
+
 
     def _align_ui_nodes(self):
         # aligns all the nodes into a circle
@@ -241,6 +304,7 @@ class MainWindow(QWidget):
             x = radius * math.sin(degree) + midx
             y = radius * math.cos(degree) + midy
             nodes_list[i].setPos(x, y)
+        self.update_ui_links()
 
     def log_message(self, message):
         self.output_log.append(message)
@@ -266,9 +330,17 @@ class Controller(QObject):
     def _initialize_simulation(self):
         self.log_message("Initializing example topology...")
         
-        self.add_sim_node("c")
-        self.add_sim_node("a")
-        self.add_sim_node("b")
+        behavior = '\n'.join( [
+            'if not self.state[ "initialized" ]:',
+            '   self.send( next( iter( self.txIntfs ) ), "hello wolrd" )',
+            '   self.state[ "initialized" ] = True',
+            'elif self.rxWaiting:',
+            '   print( f"{self.name} got {self.recv()}" )',
+            'self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )',
+        ] )
+        self.add_sim_node( "a", behavior=behavior, state={ 'initialized': False } )
+        self.add_sim_node( "b", behavior=behavior, state={ 'initialized': False } )
+        self.add_sim_link( "link1", "a", "b" )
 
         self.simulation_loop = self.topology.step()
         self.log_message("Topo initialized.")
@@ -280,26 +352,38 @@ class Controller(QObject):
         self.simulation_loop = None
         self._initialize_simulation()
 
-    def add_sim_node(self, name, behavior="print(self.name)"):
+    def add_sim_node(self, name, behavior="print(self.name)", state = {}):
         if name in self.topology.nodes:
             self.log_message(f"Node '{name}' already exists.")
             return
-        behavior='\n'.join( [
-        'print(self.name)',
-        'self.state["power"] = True'
-        'remaining = True',
-    ] )
+        sim_node = self.topology.addNode(name, behavior=behavior, state=state)
 
-        sim_node = self.topology.addNode(name, behavior=behavior)
         self.main_window.add_ui_node(name, sim_node)
-        self.log_message(f"Added sim node '{name}'.")
+        self.log_message(f"Added node '{name}'.")
 
     def remove_sim_node(self, name):
         if name in self.topology.nodes:
             del self.topology.nodes[name]
-            self.log_message(f"Removed sim node '{name}'.")
+            self.log_message(f"Removed node '{name}'.")
         else:
-            self.log_message(f"Sim node '{name}' not found.")
+            self.log_message(f"Node '{name}' not found.")
+
+    def add_sim_link(self, name, peer1_name, peer2_name):
+        if name in self.topology.links:
+            self.log_message(f"Link '{name}' already exists.")
+            return
+
+        sim_link = self.topology.addLink(peer1_name, peer2_name)
+
+        self.main_window.add_ui_link(name, sim_link, peer1_name, peer2_name)
+        self.log_message(f"Added link '{name}'.")
+
+    def remove_sim_link(self, name):
+        if name in self.topology.links:
+            del self.topology.links[name]
+            self.log_message(f"Removed link '{name}'.")
+        else:
+            self.log_message(f"Link '{name}' not found.")
 
     def step_simulation(self):
         try:
@@ -320,7 +404,6 @@ class Controller(QObject):
             self.log_message(f"Error during simulation step: {e}")
 
     def continue_simulation(self):
-        self.log_message(f"continuing...\n")
         for _ in self.simulation_loop:
             pass
         self.log_message(f"converged")

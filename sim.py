@@ -118,10 +118,12 @@ class Topology:
          self.nodeBehavior[ name ] = behaviorName
 
       self.links[ name ] = {}
-      self.nodes[ name ] = Node( name, behavior=behavior, state=state,
+      new_node = Node( name, behavior=behavior, state=state,
                                  txCallback=self.sendCallback )
+      self.nodes[ name ] = new_node
       # give node a chance to initialize any awaiting actions
       self.waiting.add( name )
+      return new_node
 
    def addLink( self, peerA, peerB, maxDepth=0 ):
       assert peerB not in self.links[ peerA ], 'duplicate link'
