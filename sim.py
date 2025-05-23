@@ -113,17 +113,26 @@ class Topology:
       
    def addNode( self, name, behaviorName=None, state=None ):
       assert name not in self.nodes, 'node names must be unique'
-      behavior = self.behaviors.get( behaviorName, None ) 
-      if behavior:
-         self.nodeBehavior[ name ] = behaviorName
 
       self.links[ name ] = {}
-      new_node = Node( name, behavior=behavior, state=state,
-                                 txCallback=self.sendCallback )
+      new_node = Node( name, state=state, txCallback=self.sendCallback )
       self.nodes[ name ] = new_node
-      # give node a chance to initialize any awaiting actions
-      self.waiting.add( name )
+      if behaviorName:
+         self.setNodeBehavior( name, behaviorName )
       return new_node
+
+   def setNodeBehavior( self, name, behaviorName ):
+      assert name in self.nodes, 'no such node'
+      if behaviorName:
+         assert behaviorName in self.behaviors, 'no such behavior'
+      
+      behavior = self.behaviors.get( behaviorName, None ) 
+      self.nodeBehavior[ name ] = behaviorName or ''
+
+      self.nodes[ name ].behavior = behavior
+      # give it a chance to run if it has initialization
+      if behaviorName:
+         self.waiting.add( name )
 
    def delNode( self, name ):
       if name not in self.nodes:

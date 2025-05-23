@@ -1,8 +1,9 @@
 "behaviors":
   "hello": |-
-    if not self.state[ "initialized" ]:
-       self.send( next( iter( self.txIntfs ) ), "hello wolrd" )
+    if not self.state.get( "initialized", False ):
        self.state[ "initialized" ] = True
+       if self.txIntfs:
+          self.send( next( iter( self.txIntfs ) ), "hello wolrd" )
     elif self.rxWaiting:
        print( f"{self.name} got {self.recv()}" )
     self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )

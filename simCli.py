@@ -127,6 +127,10 @@ class SimShell( Cmd ):
          elif op in ( 's', 'state' ):
             pass
          elif op in ( 'b', 'behavior' ):
+            if not len( tokens ) > 3:
+               return
+            behaviorName = tokens[ 3 ]
+            top.setNodeBehavior( name, behaviorName )
             pass
          else:
             print( "unknown topology node NAME command" )
