@@ -9,11 +9,12 @@ def loadTopology( dump ):
    state = safe_load( dump )
    top = Topology()
    for k, b in state[ 'behaviors' ].items():
-      top.addBehavior( k, b )
+      top.addBehavior( str( k ), b )
    for k, n in state[ 'nodes' ].items():
-      top.addNode( k, **n )
+      top.addNode( str( k ), **n )
    for k, l in state[ 'links' ].items():
       src, dst = eval( k )
+      src, dst = str( src ), str( dst )
       # each duplex link is created once
       if dst not in top.links.get( src, {} ):
          top.addLink( src, dst )

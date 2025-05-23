@@ -7,18 +7,18 @@
        print( f"{self.name} got {self.recv()}" )
     self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )
 links:
-  (1, 2):
+  ('1', '2'):
     maxDepth: 2
     queue: []
-  (2, 1):
+  ('2', '1'):
     maxDepth: 2
     queue: []
 nodes:
-  1:
+  '1':
     behaviorName: hello
     state:
       initialized: false
-  2:
+  '2':
     behaviorName: hello
     state:
       initialized: false

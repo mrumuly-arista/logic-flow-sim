@@ -125,7 +125,11 @@ class SimShell( Cmd ):
          elif op in ( 'r', 'remove', 'd', 'del', 'delete' ):
             top.delNode( name )
          elif op in ( 's', 'state' ):
-            pass
+            if not len( tokens ) > 3:
+               return
+            key = tokens[ 3 ]
+            value = None if len( tokens ) == 4 else " ".join( tokens[ 4: ] )
+            top.setNodeState( name, key, value )
          elif op in ( 'b', 'behavior' ):
             if not len( tokens ) > 3:
                return

@@ -134,6 +134,16 @@ class Topology:
       if behaviorName:
          self.waiting.add( name )
 
+   def setNodeState( self, name, key, value ):
+      assert name in self.nodes, 'no such node'
+      node = self.nodes[ name ]
+
+      if value is None:
+         if key in node.state:
+            del node.state[ key ]
+         return
+      node.state[ key ] = value
+
    def delNode( self, name ):
       if name not in self.nodes:
          # make idempotent

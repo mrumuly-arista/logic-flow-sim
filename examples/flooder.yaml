@@ -1,103 +1,79 @@
-behaviors:
-  simple_flooder: |-
-    
-    if 'received_messages' not in self.state:
-      self.state['received_messages'] = set()
-      self.state['initial_flood_done'] = False 
-    if not self.state['initial_flood_done'] and 'origin_message' in self.state:
-      message_to_send = self.state['origin_message']
-      if message_to_send not in self.state['received_messages']: 
-        for neighbor_interface in self.txIntfs:
-          self.send(neighbor_interface, message_to_send)
-        self.state['received_messages'].add(message_to_send)
-        print(f"{self.name} originating and sending: {message_to_send}")
-      self.state['initial_flood_done'] = True 
-    message_flooded_this_activation = False
-    if self.rxWaiting:
-      received_message = self.recv()
-      if received_message is not None:
-        if received_message not in self.state['received_messages']:
-          print(f"{self.name} received new message '{received_message}'")
-          self.state['received_messages'].add(received_message)
-          for neighbor_interface in self.txIntfs:
-            self.send(neighbor_interface, received_message)
-            print(f"{self.name} flooding '{received_message}' to {neighbor_interface}")
-          message_flooded_this_activation = True
-        else:
-          print(f"{self.name} already processed '{received_message}'")
-    if not self.state['initial_flood_done'] and 'origin_message' in self.state:
-        self.remaining = True
-    elif self.rxWaiting: 
-        self.remaining = True
-    elif message_flooded_this_activation: 
-        self.remaining = True
-    else:
-        self.remaining = False
-
-  passive_listener: |-
-    
-    if 'log' not in self.state:
-      self.state['log'] = []
-    if self.rxWaiting: 
-      received_message = self.recv()
-      if received_message is not None:
-        print(f"{self.name} (listener) got: '{received_message}'")
-        self.state['log'].append(received_message)
-    self.remaining = bool(self.rxWaiting) 
-
+"behaviors":
+  "passive_listener": "\nif 'log' not in self.state:\n  self.state['log'] = []\nif\
+    \ self.rxWaiting: \n  received_message = self.recv()\n  if received_message is\
+    \ not None:\n    print(f\"{self.name} (listener) got: '{received_message}'\")\n\
+    \    self.state['log'].append(received_message)\nself.remaining = bool(self.rxWaiting) "
+  "simple_flooder": "\nif 'received_messages' not in self.state:\n  self.state['received_messages']\
+    \ = set()\n  self.state['initial_flood_done'] = False \nif not self.state['initial_flood_done']\
+    \ and 'origin_message' in self.state:\n  message_to_send = self.state['origin_message']\n\
+    \  if message_to_send not in self.state['received_messages']: \n    for neighbor_interface\
+    \ in self.txIntfs:\n      self.send(neighbor_interface, message_to_send)\n   \
+    \ self.state['received_messages'].add(message_to_send)\n    print(f\"{self.name}\
+    \ originating and sending: {message_to_send}\")\n  self.state['initial_flood_done']\
+    \ = True \nmessage_flooded_this_activation = False\nif self.rxWaiting:\n  received_message\
+    \ = self.recv()\n  if received_message is not None:\n    if received_message not\
+    \ in self.state['received_messages']:\n      print(f\"{self.name} received new\
+    \ message '{received_message}'\")\n      self.state['received_messages'].add(received_message)\n\
+    \      for neighbor_interface in self.txIntfs:\n        self.send(neighbor_interface,\
+    \ received_message)\n        print(f\"{self.name} flooding '{received_message}'\
+    \ to {neighbor_interface}\")\n      message_flooded_this_activation = True\n \
+    \   else:\n      print(f\"{self.name} already processed '{received_message}'\"\
+    )\nif not self.state['initial_flood_done'] and 'origin_message' in self.state:\n\
+    \    self.remaining = True\nelif self.rxWaiting: \n    self.remaining = True\n\
+    elif message_flooded_this_activation: \n    self.remaining = True\nelse:\n   \
+    \ self.remaining = False"
+links:
+  ('1', '2'):
+    maxDepth: 0
+    queue: []
+  ('1', '3'):
+    maxDepth: 0
+    queue: []
+  ('2', '1'):
+    maxDepth: 0
+    queue: []
+  ('2', '4'):
+    maxDepth: 0
+    queue: []
+  ('3', '1'):
+    maxDepth: 0
+    queue: []
+  ('3', '4'):
+    maxDepth: 0
+    queue: []
+  ('3', '5'):
+    maxDepth: 0
+    queue: []
+  ('4', '2'):
+    maxDepth: 0
+    queue: []
+  ('4', '3'):
+    maxDepth: 0
+    queue: []
+  ('4', '5'):
+    maxDepth: 0
+    queue: []
+  ('5', '3'):
+    maxDepth: 0
+    queue: []
+  ('5', '4'):
+    maxDepth: 0
+    queue: []
 nodes:
-  1:
+  '1':
     behaviorName: simple_flooder
     state:
-      origin_message: "ALERT_NODE_1"
-  2:
+      origin_message: ALERT_NODE_1
+  '2':
     behaviorName: simple_flooder
     state: {}
-  3:
+  '3':
     behaviorName: simple_flooder
     state:
-      origin_message: "INFO_NODE_3"
-  4:
+      origin_message: INFO_NODE_3
+  '4':
     behaviorName: passive_listener
     state: {}
-  5:
+  '5':
     behaviorName: simple_flooder
     state: {}
-
-links:
-  (1, 2):
-    maxDepth: 0
-    queue: []
-  (2, 1):
-    maxDepth: 0
-    queue: []
-  (1, 3):
-    maxDepth: 0
-    queue: []
-  (3, 1):
-    maxDepth: 0
-    queue: []
-  (2, 4):
-    maxDepth: 0
-    queue: []
-  (4, 2):
-    maxDepth: 0
-    queue: []
-  (3, 4):
-    maxDepth: 0
-    queue: []
-  (4, 3):
-    maxDepth: 0
-    queue: []
-  (3, 5):
-    maxDepth: 0
-    queue: []
-  (5, 3):
-    maxDepth: 0
-    queue: []
-  (4, 5):
-    maxDepth: 0
-    queue: []
-  (5, 4):
-    maxDepth: 0
-    queue: []
