@@ -65,7 +65,10 @@ class Topology:
 
 if __name__ == "__main__":
    top = Topology()
-   top.addNode( 1, behavior='print(self.name)' )
+   top.addNode( 1, behavior='\n'.join( [
+      'print(self.name)',
+      'remaining = True',
+   ] )
    loop = top.step()
 
    # simple pdb-like interface
