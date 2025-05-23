@@ -11,19 +11,6 @@ from simFile import loadTopologyFile, dumpTopology, dumpTopologyFile
 # -b --batch: batch mode, run non-interactively
 
 top = Topology()
-bKey = 'hello'
-behavior = '\n'.join( [
-   'if not self.state[ "initialized" ]:',
-   '   self.send( next( iter( self.txIntfs ) ), "hello wolrd" )',
-   '   self.state[ "initialized" ] = True',
-   'elif self.rxWaiting:',
-   '   print( f"{self.name} got {self.recv()}" )',
-   'self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )',
-] )
-top.addBehavior( bKey, behavior )
-top.addNode( 1, behaviorName=bKey, state={ 'initialized': False } )
-top.addNode( 2, behaviorName=bKey, state={ 'initialized': False } )
-top.addLink( 1, 2 )
 loop = top.step()
 
 # simple pdb-like interface
@@ -89,7 +76,9 @@ class SimShell( Cmd ):
       
       path = " ".join( tokens[ 1: ] )
       if tokens[ 0 ] in ( 'l', 'load' ):
+         global top, loop
          top = loadTopologyFile( path )
+         loop = top.step()
       elif tokens[ 0 ] in ( 'd', 'dump' ):
          dumpTopologyFile( top, path )
    def do_f( self, arg ):
@@ -110,17 +99,53 @@ class SimShell( Cmd ):
    def do_e( self, arg ):
       'alias: quit'
       return self.do_quit( arg )
+
+   def do_topology( self, arg ):
+      'manipulate the current topology'
+      if not arg:
+         return
+      tokens = arg.split()
+      if not tokens:
+         return
+      
+      if tokens[ 0 ] in ( 'n', 'node' ):
+         if not len( tokens ) > 2:
+            return
+         name = tokens[ 1 ]
+         op = tokens[ 2 ]
+         if op in ( 'a', 'add' ):
+            pass
+         elif op in ( 'r', 'remove', 'd', 'delete' ):
+            pass
+         elif op in ( 's', 'state' ):
+            pass
+         elif op in ( 'b', 'behavior' ):
+            pass
+      elif tokens[ 0 ] in ( 'l', 'link' ):
+         pass
+      elif tokens[ 0 ] in ( 'b', 'behavior' ):
+         pass
+
+   def do_t( self, arg ):
+      'alias: topology'
+      self.do_topology( arg )
+   def do_top( self, arg ):
+      'alias: topology'
+      self.do_topology( arg )
+   def do_topo( self, arg ):
+      'alias: topology'
+      self.do_topology( arg )
       
    # TODO commands to manipulate topology
    # top/topo/topology
    #    n, node: manipulate node, name
-   #       a, add: add node (state and behavior name)
+   #       a, add: add node (optional behavior name, state)
    #       r, remove: remove node (removes associated links as well)
    #       s, set: set state value manually (key, value)
    #       b, behavior: set behavior by name
    #    l, link: manipulate links, name, name
-   #       a, add: add link (name, name)
-   #       r, remove: remove link (name, name)
+   #       a, add: add link
+   #       r, remove: remove link
    #       m, message: manipulate messages
    #          p, push: push message in
    #          i, insert: add message at specific index
