@@ -52,10 +52,12 @@ class Topology:
 
    def addNode( self, name, behavior=None ):
       assert name not in self.nodes, 'node names must be unique'
-      self.nodes[ name ] = Node( name, behavior=behavior )
+      new_node = Node( name, behavior=behavior )
+      self.nodes[ name ] = new_node
       # give node a chance to initialize any awaiting actions
       self.waiting.add( name )
-
+      return new_node
+   
    def step( self ):
       while self.waiting:
          n = self.waiting.pop()
@@ -68,7 +70,7 @@ if __name__ == "__main__":
    top.addNode( 1, behavior='\n'.join( [
       'print(self.name)',
       'remaining = True',
-   ] )
+   ] ))
    loop = top.step()
 
    # simple pdb-like interface
