@@ -14,8 +14,10 @@ def loadTopology( dump ):
       top.addNode( k, **n )
    for k, l in state[ 'links' ].items():
       src, dst = eval( k )
+      # each duplex link is created once
       if dst not in top.links.get( src, {} ):
          top.addLink( src, dst )
+      # subsequent entries can set maxDepth or messages
       link = top.links[ src ][ dst ]
       link.maxDepth = l[ 'maxDepth' ]
       link.queue = l[ 'queue' ]
@@ -31,6 +33,10 @@ def dumpTopology( topo ):
    
    return safe_dump( behaviors, default_style="|" ) + safe_dump( state )
 
-   print( dump )
-   loadTopology( dump )
+def loadTopologyFile( path ):
+   with open( path, mode='r' ) as file:
+      return loadTopology( file )
 
+def dumpTopologyFile( topo, path ):
+   with open( path, mode='w' ) as file:
+      file.write( dumpTopology( topo ) )
