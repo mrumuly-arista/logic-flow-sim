@@ -42,21 +42,26 @@ class Node:
       exec( self.behavior )
       return remaining
 
-   def hasActivities( self ):
-      return False
-
 class Topology:
    def __init__( self ):
       self.nodes = {}
       # key links by [ source ][ sink ]
       self.links = {}
+      # track nodes with actions waiting
+      self.waiting = set()
 
    def addNode( self, name, behavior=None ):
+      assert name not in self.nodes, 'node names must be unique'
       self.nodes[ name ] = Node( name, behavior=behavior )
+      # give node a chance to initialize any awaiting actions
+      self.waiting.add( name )
 
    def step( self ):
-      for n in cycle( self.nodes.values() ):
-         yield n.runActivities()
+      while self.waiting:
+         n = self.waiting.pop()
+         if self.nodes[ n ].runActivities():
+            self.waiting.add( n )
+         yield
 
 if __name__ == "__main__":
    top = Topology()
@@ -74,7 +79,10 @@ if __name__ == "__main__":
          for _ in loop:
             pass
       elif cmd in ( 'n', 'next', 's', 'step' ):
-         next( loop )
+         if loop:
+            next( loop )
+         else:
+            print( "nothing to do" )
       elif cmd in ( 'h', 'help', 'm', 'man' ):
          print( *[
             'usage',
