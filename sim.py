@@ -2,9 +2,6 @@
 # Arista Networks, Inc. Confidential and Proprietary.
 
 from __future__ import absolute_import, division, print_function
-from itertools import cycle
-from collections import defaultdict
-
 
 # a link might have latency
 class Link:
@@ -23,6 +20,12 @@ class Link:
    def push( self, message ):
       if not self.maxDepth or self.depth() < self.maxDepth:
          self.queue.append( message )
+   
+   def dump( self ):
+      return {
+         'maxDepth': self.maxDepth,
+         'queue': self.queue,
+      }
 
 class Node:
    def __init__( self, name, behavior=None, state=None, txCallback=None ):
@@ -46,6 +49,13 @@ class Node:
       assert not peer in self.rxIntfs, 'duplicate link'
       self.rxIntfs[ peer ] = rx
       self.txIntfs[ peer ] = tx
+
+   def dump( self ):
+      return {
+         'name': self.name,
+         'behavior': self.behavior,
+         'state': self.state
+      }
 
    def recv( self ):
       'get a message from those waiting'
@@ -77,11 +87,36 @@ class Topology:
       self.nodes = {}
       # key links by [ source ][ sink ]
       self.links = {}
+      # behavior blocks for use on nodes
+      self.behaviors = {}
+      self.nodeBehavior = {}
       # track nodes with actions waiting
       self.waiting = set()
 
-   def addNode( self, name, behavior=None, state=None ):
+   def dump( self ):
+      nodes = { k: n.dump() for k, n in self.nodes.items() }
+      state = {
+         'behaviors': self.behaviors,
+         'nodes': { k: { 
+            'state': n[ 'state' ],
+            'behaviorName': self.nodeBehavior[ k ] }
+            for k, n in nodes.items() },
+         'links': {},
+      }
+      for src, dstList in self.links.items():
+         for dst, link in dstList.items():
+            state[ 'links' ][ str( ( src, dst ) ) ] = link.dump()
+      return state
+
+   def addBehavior( self, name, behavior ):
+      self.behaviors[ name ] = behavior
+      
+   def addNode( self, name, behaviorName=None, state=None ):
       assert name not in self.nodes, 'node names must be unique'
+      behavior = self.behaviors.get( behaviorName, None ) 
+      if behavior:
+         self.nodeBehavior[ name ] = behaviorName
+
       self.links[ name ] = {}
       new_node = Node( name, behavior=behavior, state=state,
                                  txCallback=self.sendCallback )
@@ -90,9 +125,9 @@ class Topology:
       self.waiting.add( name )
       return new_node
 
-   def addLink( self, peerA, peerB ):
+   def addLink( self, peerA, peerB, maxDepth=0 ):
       assert peerB not in self.links[ peerA ], 'duplicate link'
-      ab, ba = Link(), Link()
+      ab, ba = Link( maxDepth ), Link( maxDepth )
       self.links[ peerA ][ peerB ] = ab
       self.links[ peerB ][ peerA ] = ba
       self.nodes[ peerA ].addLink( peerB, ba, ab )
@@ -112,6 +147,7 @@ class Topology:
 
 if __name__ == "__main__":
    top = Topology()
+   bKey = 'hello'
    behavior = '\n'.join( [
       'if not self.state[ "initialized" ]:',
       '   self.send( next( iter( self.txIntfs ) ), "hello wolrd" )',
@@ -120,8 +156,9 @@ if __name__ == "__main__":
       '   print( f"{self.name} got {self.recv()}" )',
       'self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )',
    ] )
-   top.addNode( 1, behavior=behavior, state={ 'initialized': False } )
-   top.addNode( 2, behavior=behavior, state={ 'initialized': False } )
+   top.addBehavior( bKey, behavior )
+   top.addNode( 1, behaviorName=bKey, state={ 'initialized': False } )
+   top.addNode( 2, behaviorName=bKey, state={ 'initialized': False } )
    top.addLink( 1, 2 )
    loop = top.step()
 
@@ -146,5 +183,9 @@ if __name__ == "__main__":
             'c, continue: run continuously',
             'n, next, s, step: run the next step',
             'h, help, m, man: display this help text',
+            'p, print: display state information'
             ], sep='\n' )
+      elif cmd in ( 'p', 'print' ):
+         from simFile import dumpTopology
+         print( dumpTopology( top ) )
       lastCmd = cmd
