@@ -3,6 +3,7 @@
 
 import sys
 import math
+import os
 
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QPalette
@@ -23,12 +24,14 @@ from PyQt5.QtWidgets import (
     QTextEdit,
     QGroupBox,
     QLineEdit,
+    QComboBox,
 )
 
-from sim import Topology, Node as SimNode, Link as SimLink # Assuming 'sim' is a custom module
+from sim import Topology, Node as SimNode, Link as SimLink
+from simFile import loadTopologyFile, dumpTopologyFile
 
 # --- Constants ---
-NODE_SIZE = 100
+NODE_SIZE = 150
 LINK_THICKNESS_NORMAL = 5
 LINK_THICKNESS_HIGHLIGHT = 10
 LINK_COLOR_NORMAL = QColor(100, 0, 0)
@@ -40,8 +43,8 @@ SCENE_WIDTH = 500
 SCENE_HEIGHT = 500
 MAIN_WINDOW_X = 100
 MAIN_WINDOW_Y = 100
-MAIN_WINDOW_WIDTH = 1000
-MAIN_WINDOW_HEIGHT = 700
+MAIN_WINDOW_WIDTH = 1500
+MAIN_WINDOW_HEIGHT = 800
 TOOLTIP_WINDOW_X = 200
 TOOLTIP_WINDOW_Y = 200
 TOOLTIP_WINDOW_WIDTH = 400
@@ -53,6 +56,18 @@ COLOR_BACKGROUND_DARK = QColor(43, 43, 43) # Similar to original QSS
 COLOR_TEXT_LIGHT = QColor(240, 240, 240)
 COLOR_CONTROL_BACKGROUND = QColor(51, 51, 51) # For group boxes, etc.
 COLOR_BORDER_GREY = QColor(68, 68, 68)
+
+class QtOutputStream(QObject):
+    text_written = pyqtSignal(str)
+
+    def write(self, text):
+        self.text_written.emit(str(text))
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
 
 class ToolTipWindow(QMainWindow):
     """
@@ -103,9 +118,19 @@ class ToolTipWindow(QMainWindow):
         layout.addWidget(close_button)
 
     def _update_state_display(self):
-        """Populates the state display QTextEdit with the current item state."""
-        state_text = "\n".join(f"{key}: {value}" for key, value in self._item_state.items())
-        self.state_display.setText(state_text)
+        state_text_parts = []
+        for key, value in self._item_state.items():
+            if isinstance(value, dict):
+                state_text_parts.append(f"{key}:")
+                for sub_key, sub_value in value.items():
+                    if isinstance(sub_value, list) and len(sub_value) > 5: # Truncate long queues
+                        sub_value_display = f"{sub_value[:5]}... (total {len(sub_value)})"
+                    else:
+                        sub_value_display = sub_value
+                    state_text_parts.append(f"  {sub_key}: {sub_value_display}")
+            else:
+                state_text_parts.append(f"{key}: {value}")
+        self.state_display.setText("\n".join(state_text_parts))
 
     def update_item_state_display(self, new_state: dict):
         """
@@ -143,8 +168,15 @@ class UILink(QGraphicsLineItem):
         self._parent_window = parent_window
         self.start_node = start_node
         self.end_node = end_node
-        self._sim_link_ref: SimLink = None
+        self._sim_link_ref1: SimLink = None
+        self._sim_link_ref2: SimLink = None
         self._detail_window: ToolTipWindow = None
+
+        self.info_text_item = QGraphicsTextItem(self)
+        info_font = self.info_text_item.font()
+        info_font.setPointSize(max(6, info_font.pointSize() - 3))
+        self.info_text_item.setFont(info_font)
+        self.info_text_item.setDefaultTextColor(NODE_OUTLINE_COLOR)
 
         self._setup_appearance()
 
@@ -159,31 +191,89 @@ class UILink(QGraphicsLineItem):
         self.setPen(QPen(LINK_COLOR_NORMAL, LINK_THICKNESS_NORMAL, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         self.setZValue(-1) # Draw links behind nodes
 
-    def set_sim_link_ref(self, link_ref: SimLink):
+    def set_sim_link_ref2(self, link_ref: SimLink ):
         """
         Sets the reference to the corresponding simulation link object.
         """
-        self._sim_link_ref = link_ref
+        self._sim_link_ref2 = link_ref
+        self.update_info_text()
+
+    def set_sim_link_ref(self, link_ref: SimLink ):
+        """
+        Sets the reference to the corresponding simulation link object.
+        """
+        self._sim_link_ref1 = link_ref
+
+    def update_info_text(self):
+        info_str = ""
+        if self._sim_link_ref1 and self._sim_link_ref2:
+            dump1 = self._sim_link_ref1.dump()
+            dump2 = self._sim_link_ref2.dump()
+
+            q1_depth = len(dump1['queue'])
+            max1_info = f"max: {dump1['maxDepth']}" if dump1['maxDepth'] > 0 else "max: inf"
+            
+            q2_depth = len(dump2['queue'])
+            max2_info = f"max: {dump2['maxDepth']}" if dump2['maxDepth'] > 0 else "max: inf"
+            info1_str = f"{self.start_node.name} -> {self.end_node.name}: Q {q1_depth}/{max1_info.split(': ')[1]}"
+            info2_str = f"{self.end_node.name} -> {self.start_node.name}: Q {q2_depth}/{max2_info.split(': ')[1]}"
+            info_str = f"{info1_str}\n{info2_str}"
+            
+            self.info_text_item.setPlainText(info_str)
+            self._position_info_text()
+        elif self._sim_link_ref1:
+            dump1 = self._sim_link_ref1.dump()
+            q1_depth = len(dump1['queue'])
+            max1_info = f"max: {dump1['maxDepth']}" if dump1['maxDepth'] > 0 else "max: inf"
+            info_str = f"{self.start_node.name} -> {self.end_node.name}: Q {q1_depth}/{max1_info.split(': ')[1]}"
+            self.info_text_item.setPlainText(info_str)
+            self._position_info_text()
+        elif self._sim_link_ref2:
+            dump2 = self._sim_link_ref2.dump()
+            q2_depth = len(dump2['queue'])
+            max2_info = f"max: {dump2['maxDepth']}" if dump2['maxDepth'] > 0 else "max: inf"
+            info_str = f"{self.end_node.name} -> {self.start_node.name}: Q {q2_depth}/{max2_info.split(': ')[1]}"
+            self.info_text_item.setPlainText(info_str)
+            self._position_info_text()
+        else:
+            self.info_text_item.setPlainText("")
+
+    def _position_info_text(self):
+        if not (self.start_node and self.end_node):
+            return
+        mid_x = (self.line().p1().x() + self.line().p2().x()) / 2
+        mid_y = (self.line().p1().y() + self.line().p2().y()) / 2
+        offset_x = 5
+        offset_y = -10 # Position slightly above the line's midpoint
+        text_rect = self.info_text_item.boundingRect()
+        self.info_text_item.setPos(mid_x - text_rect.width() / 2 + offset_x, mid_y - text_rect.height() / 2 + offset_y)
 
     def update_position(self):
         """Updates the line's start and end points based on the connected nodes' positions."""
         if self.start_node and self.end_node:
-            self.setLine(self.start_node.center_point().x(), self.start_node.center_point().y(),
-                         self.end_node.center_point().x(), self.end_node.center_point().y())
+            p1 = self.start_node.center_point()
+            p2 = self.end_node.center_point()
+            self.setLine(p1.x(), p1.y(), p2.x(), p2.y())
+            self._position_info_text() 
 
     def mousePressEvent(self, event):
-        """Handles mouse press events on the link."""
-        print(f"Link chosen between {self.start_node.name} and {self.end_node.name}")
-        self.setPen(QPen(LINK_COLOR_HIGHLIGHT, LINK_THICKNESS_HIGHLIGHT, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        print(f"Link chosen: {self.name} (between {self.start_node.name} and {self.end_node.name})")
+        current_pen = self.pen()
+        current_pen.setColor(LINK_COLOR_HIGHLIGHT)
+        current_pen.setWidth(LINK_THICKNESS_HIGHLIGHT)
+        self.setPen(current_pen)
         self.update()
 
-        # Open detail window for the link
-        if self._sim_link_ref:
-            self._detail_window = ToolTipWindow(self, self.name, self._sim_link_ref.state)
+        if self._sim_link_ref1 and self._sim_link_ref2: # should all have two
+            combined_link_state = {
+                f"Forward ({self.start_node.name} -> {self.end_node.name})": self._sim_link_ref1.dump(),
+                f"Backward ({self.end_node.name} -> {self.start_node.name})": self._sim_link_ref2.dump()
+            }
+            self._detail_window = ToolTipWindow(self, self.name, combined_link_state)
             self._detail_window.delete_item_from_scene.connect(self._parent_window.remove_ui_link)
             self._detail_window.show()
         else:
-            print(f"Warning: UILink {self.name} has no associated SimLink.")
+            print(f"Warning: UILink {self.name} has no associated SimLink(s).")
 
         super().mousePressEvent(event)
 
@@ -205,6 +295,8 @@ class UINode(QGraphicsEllipseItem):
         """
         super().__init__(-NODE_SIZE / 2, -NODE_SIZE / 2, NODE_SIZE, NODE_SIZE)
         self.name = sim_node_name
+        if isinstance(self.name, int):
+            self.name = str(self.name)
         self._parent_window = parent_window
         self._sim_node_ref: SimNode = None
         self._detail_window: ToolTipWindow = None
@@ -220,8 +312,17 @@ class UINode(QGraphicsEllipseItem):
         self.setPen(pen)
         self.setPos(x, y)
         self.setFlag(QGraphicsItem.ItemIsSelectable) # Allows selection, but not dragging currently
+        
+        self.name_text_item = QGraphicsTextItem(self.name, self)
+        font = self.name_text_item.font()
+        font.setBold(True)
+        self.name_text_item.setFont(font)
 
-        self.text_item = QGraphicsTextItem(self.name, self)
+        self.state_text_item = QGraphicsTextItem("", self)
+        state_font = self.state_text_item.font()
+        state_font.setPointSize(max(6, state_font.pointSize() - 2))
+        self.state_text_item.setFont(state_font)
+        self.state_text_item.setTextWidth(NODE_SIZE * 0.8)
         self._center_text()
 
     def set_sim_node_ref(self, sim_ref: SimNode):
@@ -229,6 +330,7 @@ class UINode(QGraphicsEllipseItem):
         Sets the reference to the corresponding simulation node object.
         """
         self._sim_node_ref = sim_ref
+        self.update_ui_from_sim_state()
 
     def center_point(self):
         """
@@ -239,23 +341,29 @@ class UINode(QGraphicsEllipseItem):
     def update_ui_from_sim_state(self):
         """Updates the UI node's visual representation and detail window based on its sim node's state."""
         if self._sim_node_ref:
-            state = self._sim_node_ref.state
-            # Example: Change color based on state (uncomment and adjust as needed)
-            # if state.get("waiting", False):
-            #     self.setBrush(QBrush(Qt.green))
-            # else:
-            #     self.setBrush(QBrush(Qt.red))
+            node_dump = self._sim_node_ref.dump()
+            state = node_dump[ "state" ]
+            state_display_text = ", ".join(f"{k_short}:{v}" for k_short, v in list(state.items())[:2])
+            self.state_text_item.setPlainText(state_display_text)
+            self._center_text()
 
             if self._detail_window and self._detail_window.isVisible():
                 self._detail_window.update_item_state_display(state)
 
     def _center_text(self):
         """Centers the text item within the ellipse."""
-        text_rect = self.text_item.boundingRect()
         ellipse_rect = self.boundingRect()
-        x_pos = ellipse_rect.center().x() - text_rect.width() / 2
-        y_pos = ellipse_rect.center().y() - text_rect.height() / 2
-        self.text_item.setPos(x_pos, y_pos)
+        center_x = ellipse_rect.center().x()
+        
+        name_rect = self.name_text_item.boundingRect()
+        name_x = center_x - name_rect.width() / 2
+        name_y = ellipse_rect.top() + (ellipse_rect.height() * 0.15) - name_rect.height() / 2
+        self.name_text_item.setPos(name_x, name_y)
+
+        state_rect = self.state_text_item.boundingRect()
+        state_x = center_x - state_rect.width() / 2
+        state_y = self.name_text_item.y() + name_rect.height() + 2 
+        self.state_text_item.setPos(state_x, state_y)
 
     def mousePressEvent(self, event):
         """Handles mouse press events on the node."""
@@ -287,8 +395,8 @@ class MainWindow(QWidget):
         self._controller = controller_ref # Reference to the main controller
 
         self.scene = QGraphicsScene(0, 0, SCENE_WIDTH, SCENE_HEIGHT)
-        self.ui_nodes: dict[str, UINode] = {} # Map sim_node_name to UINode object
-        self.ui_links: dict[str, UILink] = {} # Map sim_link_name to UILink object
+        self.ui_nodes: dict[str, UINode] = {}
+        self.ui_links: dict[str, UILink] = {}
 
         self._setup_ui()
 
@@ -296,51 +404,44 @@ class MainWindow(QWidget):
         self.setWindowTitle("Simulation GUI")
         self.setGeometry(MAIN_WINDOW_X, MAIN_WINDOW_Y, MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
 
-        # Apply a basic dark palette to the main window
         palette = self.palette()
         palette.setColor(QPalette.Window, COLOR_BACKGROUND_DARK)
         palette.setColor(QPalette.WindowText, COLOR_TEXT_LIGHT)
-        palette.setColor(QPalette.Button, QColor(85, 85, 85)) # Button background
+        palette.setColor(QPalette.Button, QColor(85, 85, 85))
         palette.setColor(QPalette.ButtonText, COLOR_TEXT_LIGHT)
-        palette.setColor(QPalette.Highlight, QColor(0, 120, 215)) # Selection color (like Windows blue)
+        palette.setColor(QPalette.Highlight, QColor(0, 120, 215))
         palette.setColor(QPalette.HighlightedText, Qt.white)
         self.setPalette(palette)
         
         self.output_log = QTextEdit()
         self.output_log.setReadOnly(True)
         self.output_log.setObjectName("outputLog")
-        # Apply palette to QTextEdit
         text_edit_palette = self.output_log.palette()
-        text_edit_palette.setColor(QPalette.Base, QColor(58, 58, 58)) # Darker background for input/text fields
+        text_edit_palette.setColor(QPalette.Base, QColor(58, 58, 58))
         text_edit_palette.setColor(QPalette.Text, COLOR_TEXT_LIGHT)
         self.output_log.setPalette(text_edit_palette)
 
         control_panel_layout = QVBoxLayout()
-        control_panel_layout.setContentsMargins(15, 15, 15, 15) # Padding for the control panel
-        control_panel_layout.setSpacing(15) # Spacing between group boxes
 
-        control_panel_layout.addWidget(self._create_node_controls_group())
-        control_panel_layout.addWidget(self._create_link_controls_group())
-        control_panel_layout.addWidget(self._create_simulation_controls_group())
-        control_panel_layout.addStretch(1) # Pushes controls to the top
-        control_panel_layout.addWidget(self._create_log_group())
+        # control_panel_layout.addWidget(self._create_node_controls_group())
+        # control_panel_layout.addWidget(self._create_link_controls_group())
+        control_panel_layout.addWidget(self._create_simulation_controls_group(), 1)
+        control_panel_layout.addWidget(self._create_log_group(), 5)
 
         graphics_view = QGraphicsView(self.scene)
         graphics_view.setRenderHint(QPainter.Antialiasing)
         graphics_view.setMouseTracking(True)
         graphics_view.setRenderHint(QPainter.SmoothPixmapTransform)
         graphics_view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        # Apply palette to QGraphicsView
         graphics_view_palette = graphics_view.palette()
-        graphics_view_palette.setColor(QPalette.Base, QColor(60, 60, 60)) # Scene background
+        graphics_view_palette.setColor(QPalette.Base, QColor(60, 60, 60))
         graphics_view.setPalette(graphics_view_palette)
-        # Optional: Set border manually if not using QSS
         graphics_view.setStyleSheet(f"border: 1px solid rgb({COLOR_BORDER_GREY.red()}, {COLOR_BORDER_GREY.green()}, {COLOR_BORDER_GREY.blue()}); border-radius: 5px;")
 
 
         main_layout = QHBoxLayout(self)
-        main_layout.addLayout(control_panel_layout)
-        main_layout.addWidget(graphics_view)
+        main_layout.addLayout(control_panel_layout, 1)
+        main_layout.addWidget(graphics_view, 2)
 
         self.setLayout(main_layout)
 
@@ -352,7 +453,7 @@ class MainWindow(QWidget):
         group_box_palette.setColor(QPalette.WindowText, COLOR_TEXT_LIGHT)
         group_box.setPalette(group_box_palette)
         
-        # Manually set border for QGroupBox using AI power
+        # Set border for QGroupBox using AI power
         group_box.setStyleSheet(f"""
             QGroupBox {{
                 border: 1px solid rgb({COLOR_BORDER_GREY.red()}, {COLOR_BORDER_GREY.green()}, {COLOR_BORDER_GREY.blue()});
@@ -377,6 +478,16 @@ class MainWindow(QWidget):
         group_box = self._create_group_box("Node Actions")
         layout = group_box.layout()
 
+        label_node_name = QLabel("Node Name:")
+        layout.addWidget(label_node_name)
+        self.node_input = QLineEdit()
+        self.node_input.setPlaceholderText("e.g., node1")
+        line_edit_palette = self.node_input.palette()
+        line_edit_palette.setColor(QPalette.Base, QColor(58, 58, 58))
+        line_edit_palette.setColor(QPalette.Text, COLOR_TEXT_LIGHT)
+        self.node_input.setPalette(line_edit_palette)
+        layout.addWidget(self.node_input)
+
         add_node_button = QPushButton("Add New Node")
         add_node_button.clicked.connect(self._on_add_sim_node_clicked)
         layout.addWidget(add_node_button)
@@ -389,8 +500,7 @@ class MainWindow(QWidget):
         label_peer1 = QLabel("Node 1 Name:")
         layout.addWidget(label_peer1)
         self.peer1_input = QLineEdit()
-        self.peer1_input.setPlaceholderText("e.g., 'agent0'")
-        # Apply palette to QLineEdit
+        self.peer1_input.setPlaceholderText("e.g., n1")
         line_edit_palette = self.peer1_input.palette()
         line_edit_palette.setColor(QPalette.Base, QColor(58, 58, 58))
         line_edit_palette.setColor(QPalette.Text, COLOR_TEXT_LIGHT)
@@ -400,8 +510,7 @@ class MainWindow(QWidget):
         label_peer2 = QLabel("Node 2 Name:")
         layout.addWidget(label_peer2)
         self.peer2_input = QLineEdit()
-        self.peer2_input.setPlaceholderText("e.g., 'agent1'")
-        # Apply palette to QLineEdit
+        self.peer2_input.setPlaceholderText("e.g., n2")
         self.peer2_input.setPalette(line_edit_palette)
         layout.addWidget(self.peer2_input)
 
@@ -414,6 +523,26 @@ class MainWindow(QWidget):
         group_box = self._create_group_box("Simulation Controls")
         layout = group_box.layout()
 
+        load_topology_label = QLabel("Load Topology from Example:")
+        layout.addWidget(load_topology_label)
+
+        self.topology_combo_box = QComboBox()
+        self._populate_topology_dropdown() # New method to fill the dropdown
+        self.topology_combo_box.activated[str].connect(self._on_topology_selected) # Connect signal
+        layout.addWidget(self.topology_combo_box)
+
+        self.dump_filename_input = QLineEdit()
+        self.dump_filename_input.setPlaceholderText("Enter filename (e.g., my_topo.yaml)")
+        line_edit_palette = self.dump_filename_input.palette() # Get default
+        line_edit_palette.setColor(QPalette.Base, QColor(58, 58, 58)) # Set custom base
+        line_edit_palette.setColor(QPalette.Text, COLOR_TEXT_LIGHT)   # Set custom text
+        self.dump_filename_input.setPalette(line_edit_palette)
+        layout.addWidget(self.dump_filename_input)
+
+        dump_topology_button = QPushButton("Dump to File")
+        dump_topology_button.clicked.connect(self._on_dump_topology_with_input_name_clicked)
+        layout.addWidget(dump_topology_button)
+
         step_button = QPushButton("Step")
         step_button.clicked.connect(self._controller.step_simulation)
         layout.addWidget(step_button)
@@ -422,10 +551,69 @@ class MainWindow(QWidget):
         continue_button.clicked.connect(self._controller.continue_simulation)
         layout.addWidget(continue_button)
 
-        reset_button = QPushButton("Reset Simulation")
-        reset_button.clicked.connect(self._controller.reset_simulation)
-        layout.addWidget(reset_button)
+        # add dropdown box here: 
         return group_box
+    
+    def _on_dump_topology_with_input_name_clicked(self):
+        """Handles the 'Dump to File' button click using the QLineEdit for filename."""
+        file_name_only = self.dump_filename_input.text().strip()
+
+        if not file_name_only:
+            self._controller.log_message("Please enter a filename for the topology dump.")
+            return
+
+        if not (file_name_only.endswith(".yaml") or file_name_only.endswith(".yml")):
+            if "." in file_name_only: # if there's an extension already, append .yaml
+                base, ext = os.path.splitext(file_name_only)
+                file_name_only = base + ext + ".yaml" # This might result in something like file.txt.yaml
+                file_name_only += ".yaml" # Simpler: just append if not already a YAML extension
+            else: # if no extension, assume .yaml
+                file_name_only += ".yaml"
+        try:
+            base_save_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        except:
+            base_save_dir = os.getcwd()
+
+        full_file_path = os.path.join(base_save_dir, file_name_only)
+        self._controller.log_message(f"Attempting to dump topology to: {full_file_path}")
+        self._controller.dump_topology(full_file_path)
+        self.dump_filename_input.clear()
+
+    def _populate_topology_dropdown(self):
+        """Scans the 'examples' directory for .yaml/.yml files and populates the dropdown."""
+        self.topology_combo_box.clear()
+        self.topology_combo_box.addItem("Select a topology...", userData=None)
+
+        examples_dir = "examples" # Assuming 'examples' is a subdirectory
+        if not os.path.isdir(examples_dir):
+            self._controller.log_message(f"Error: '{examples_dir}' directory not found.")
+            self.topology_combo_box.setEnabled(False)
+            return
+        try:
+            yaml_files = [
+                f for f in os.listdir(examples_dir)
+                if os.path.isfile(os.path.join(examples_dir, f)) and (f.endswith(".yaml") or f.endswith(".yml"))
+            ]
+            if not yaml_files:
+                self.topology_combo_box.addItem("No YAML files found.", userData=None)
+                self.topology_combo_box.setEnabled(False)
+            else:
+                self.topology_combo_box.setEnabled(True)
+                for file_name in sorted(yaml_files):
+                    full_path = os.path.join(examples_dir, file_name)
+                    self.topology_combo_box.addItem(file_name, userData=full_path)
+        except Exception as e:
+            self._controller.log_message(f"Error scanning '{examples_dir}': {e}")
+            self.topology_combo_box.setEnabled(False)
+
+    def _on_topology_selected(self, display_text: str):
+        """Handles the selection of a topology file from the dropdown."""
+        file_path = self.topology_combo_box.currentData()
+        if file_path:
+            self._controller.log_message(f"Attempting to load: {display_text}")
+            self._controller.load_topology(file_path)
+        elif display_text != "Select a topology...":
+            self._controller.log_message(f"Invalid selection or no file path associated with: {display_text}")
     
     def _create_log_group(self) -> QGroupBox:
         group_box = self._create_group_box("Simulation Log")
@@ -443,7 +631,7 @@ class MainWindow(QWidget):
 
     def _on_add_sim_node_clicked(self):
         """Handles the 'Add Sim Node' button click."""
-        node_name = f"agent{len(self.ui_nodes)}"
+        node_name = self.node_input.text().strip()
         self._controller.add_sim_node(node_name)
 
     def add_ui_node(self, sim_node_name: str, sim_node_obj: SimNode):
@@ -486,7 +674,7 @@ class MainWindow(QWidget):
             self._align_ui_elements()
             print(f"Removed UI node and requested removal of sim node: {ui_node_item.name}")
     
-    def add_ui_link(self, sim_link_name: str, sim_link_obj: SimLink, peer1_name: str, peer2_name: str):
+    def add_ui_link(self, sim_link_obj: SimLink, peer1_name: str, peer2_name: str):
         """
         Adds a new UILink to the scene and internal tracking.
 
@@ -498,7 +686,11 @@ class MainWindow(QWidget):
         """
         peer1_node = self.ui_nodes.get(peer1_name)
         peer2_node = self.ui_nodes.get(peer2_name)
-
+        sim_link_name = f"{peer1_name}-{peer2_name}"
+        if f"{peer2_name}-{peer1_name}" in self.ui_links.keys():
+            old_ui_link = self.ui_links[f"{peer2_name}-{peer1_name}"]
+            old_ui_link.set_sim_link_ref2(sim_link_obj)
+            return # one link per dual
         if not peer1_node or not peer2_node:
             self._controller.log_message(f"Cannot add link '{sim_link_name}': one or both nodes '{peer1_name}', '{peer2_name}' do not exist in UI.")
             return
@@ -514,6 +706,7 @@ class MainWindow(QWidget):
         """Updates the positions of all UI links based on their connected nodes."""
         for ui_link in self.ui_links.values():
             ui_link.update_position()
+            ui_link.update_info_text()
         self.scene.update()
 
     def remove_ui_link(self, ui_link_item: UILink):
@@ -524,7 +717,6 @@ class MainWindow(QWidget):
             ui_link_item: The UILink object to remove.
         """
         if ui_link_item and ui_link_item.scene() == self.scene:
-            # Remove link from connected nodes' lists
             if ui_link_item.start_node and ui_link_item in ui_link_item.start_node.connected_lines:
                 ui_link_item.start_node.connected_lines.remove(ui_link_item)
             if ui_link_item.end_node and ui_link_item in ui_link_item.end_node.connected_lines:
@@ -548,7 +740,7 @@ class MainWindow(QWidget):
         # Generate a unique link name. Maybe links don't need names. Idk why I thought they should have them
         link_name = f"link{len(self.ui_links) + 1}"
         
-        self._controller.add_sim_link(link_name, peer1_name, peer2_name)
+        self._controller.add_sim_link(peer1_name, peer2_name)
         self.peer1_input.clear()
         self.peer2_input.clear()
 
@@ -583,50 +775,50 @@ class Controller(QObject):
     based on simulation events. This is the 'Controller' part of the MVC pattern.
     """
     log_message_signal = pyqtSignal(str)
+    global_print_output_signal = pyqtSignal(str)
 
     def __init__(self):
         """Initializes the Controller, setting up the simulation and UI."""
         super().__init__()
         self._topology = Topology()
         self._behaviors = self._topology.behaviors
-        self._simulation_generator = None # Generator for stepping through simulation
+        self._simulation_generator = None
 
         self.main_window = MainWindow(self)
         # Connect controller's log signal to main window's log method
+        self._original_stdout = sys.stdout # Store original stdout
+        self._print_capture_stream = QtOutputStream()
+        self._print_capture_stream.text_written.connect(self.global_print_output_signal.emit)
+
         self.log_message_signal.connect(self.main_window.log_message)
+        # self.global_print_output_signal.connect(self.main_window.log_behavior_print_output)
 
-        self._initialize_simulation_example()
-
-    def _initialize_simulation_example(self):
-        """Sets up an initial example simulation topology with nodes and links."""
-        self.log_message("Initializing example topology...")
-        
-        bKey = 'hello'
-        behavior = '\n'.join( [
-            'if not self.state[ "initialized" ]:',
-            '   self.send( next( iter( self.txIntfs ) ), "hello wolrd" )',
-            '   self.state[ "initialized" ] = True',
-            'elif self.rxWaiting:',
-            '   print( f"{self.name} got {self.recv()}" )',
-            'self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )',
-        ] )
-        self._topology.addBehavior(bKey, behavior=behavior)
-        
-        self.add_sim_node("a", behaviorKey=bKey, state={'initialized': False})
-        self.add_sim_node("b", behaviorKey=bKey, state={'initialized': False})
-        self.add_sim_link("link1", "a", "b")
-
+    def load_topology(self, file):
+        """Loads topology from yaml files"""
+        self.reset_simulation()
+        self._topology = loadTopologyFile(file)
         self._simulation_generator = self._topology.step()
-        self.log_message("Topology initialized.")
+        self._link_topology()
+        self.log_message(f"Loaded yaml file: {file}")
+    
+    def dump_topology(self, file):
+        """Dump to file"""
+        dumpTopologyFile(self._topology, file)
+
+    def _link_topology(self):
+        """Generates GUI elements for each top element"""
+        for node_name, node in self._topology.nodes.items():
+            self.main_window.add_ui_node(node_name, node)
+        
+        for src, dstList in self._topology.links.items():
+            for dst, link in dstList.items():
+                self.main_window.add_ui_link(link, src, dst)
 
     def reset_simulation(self):
         """Resets the entire simulation, clearing UI and re-initializing topology."""
-        self.log_message("Resetting simulation...")
         self.main_window.restart_ui()
         self._topology = Topology()
         self._simulation_generator = None
-        self._initialize_simulation_example()
-        self.log_message("Simulation reset complete.")
 
     def add_sim_node(self, name: str, behaviorKey: str = "hello", state: dict = {'initialized':False}):
         """
@@ -641,14 +833,13 @@ class Controller(QObject):
             self.log_message(f"Node '{name}' already exists in simulation.")
             return 
         
-        if behaviorKey not in self._behaviors:
+        if behaviorKey not in self._topology.behaviors:
             self.log_message(f"Behavior '{behaviorKey}' doesn't exist.")
             return 
         
         sim_node = self._topology.addNode(name, behaviorName=behaviorKey, state=state if state is not None else {})
         self.main_window.add_ui_node(name, sim_node)
         self.log_message(f"Added simulation node '{name}' with behavior '{behaviorKey}'.")
-        
 
     def remove_sim_node(self, name: str):
         """
@@ -663,7 +854,7 @@ class Controller(QObject):
         else:
             self.log_message(f"Simulation node '{name}' not found.")
 
-    def add_sim_link(self, name: str, peer1_name: str, peer2_name: str):
+    def add_sim_link(self, peer1_name: str, peer2_name: str):
         """
         Adds a new simulation link between two existing nodes to the topology and its UI representation.
 
@@ -672,13 +863,18 @@ class Controller(QObject):
             peer1_name: The name of the first node to connect.
             peer2_name: The name of the second node to connect.
         """
+        name = f"{peer2_name}-{peer1_name}"
+        if name in self._topology.links:
+            self.log_message(f"Link '{name}' already exists in simulation.")
+            return
+        name = f"{peer1_name}-{peer2_name}"
         if name in self._topology.links:
             self.log_message(f"Link '{name}' already exists in simulation.")
             return
 
         try:
             sim_link = self._topology.addLink(peer1_name, peer2_name)
-            self.main_window.add_ui_link(name, sim_link, peer1_name, peer2_name)
+            self.main_window.add_ui_link(sim_link, peer1_name, peer2_name)
             self.log_message(f"Added simulation link '{name}' between '{peer1_name}' and '{peer2_name}'.")
         except Exception as e:
             self.log_message(f"Failed to add link '{name}': {e}. Ensure nodes '{peer1_name}' and '{peer2_name}' exist.")
@@ -702,14 +898,17 @@ class Controller(QObject):
         Executes a single step of the simulation and updates the UI accordingly.
         """
         if not self._simulation_generator:
-            self.log_message("Simulation not initialized. Please reset or add nodes.")
+            self.log_message("Simulation not initialized...") # Use self.log_message for controlled logging
             return
 
+        sys.stdout = self._print_capture_stream # Redirect global stdout
         try:
             next(self._simulation_generator)
-            # Log current state of simulation nodes and update UI
+            self.log_message("\n--- Simulation Step Executed ---") # Goes to dedicated log
+
             for node_name, sim_node_obj in self._topology.nodes.items():
                 is_waiting = node_name in self._topology.waiting
+                # This log_message goes to the dedicated simulation log
                 self.log_message(f"Node: {sim_node_obj.name}, State: {sim_node_obj.state}, Is waiting: {is_waiting}")
 
             self.main_window.update_ui_nodes()
@@ -717,10 +916,12 @@ class Controller(QObject):
 
         except StopIteration:
             self.log_message("Simulation converged: Nothing left to do.")
-            self._simulation_generator = None # Indicate that simulation is finished
+            self._simulation_generator = None
         except Exception as e:
             self.log_message(f"Error during simulation step: {e}")
-            self._simulation_generator = None # Stop further steps on error
+            self._simulation_generator = None
+        finally:
+            sys.stdout = self._original_stdout # Always restore global stdout
 
     def continue_simulation(self):
         """
