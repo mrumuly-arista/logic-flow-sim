@@ -5,7 +5,7 @@ import sys
 import math
 
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
-from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QPainterPath, QPainterPathStroker
+from PyQt5.QtGui import QBrush, QPainter, QPen, QColor, QPalette
 from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -21,6 +21,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QTextEdit,
+    QGroupBox,
+    QLineEdit,
 )
 
 from sim import Topology, Node as SimNode, Link as SimLink # Assuming 'sim' is a custom module
@@ -45,6 +47,12 @@ TOOLTIP_WINDOW_Y = 200
 TOOLTIP_WINDOW_WIDTH = 400
 TOOLTIP_WINDOW_HEIGHT = 300
 ALIGNMENT_RADIUS = 200
+
+# Define some basic colors for the palette
+COLOR_BACKGROUND_DARK = QColor(43, 43, 43) # Similar to original QSS
+COLOR_TEXT_LIGHT = QColor(240, 240, 240)
+COLOR_CONTROL_BACKGROUND = QColor(51, 51, 51) # For group boxes, etc.
+COLOR_BORDER_GREY = QColor(68, 68, 68)
 
 class ToolTipWindow(QMainWindow):
     """
@@ -285,51 +293,148 @@ class MainWindow(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Configures the main window's user interface."""
         self.setWindowTitle("Simulation GUI")
         self.setGeometry(MAIN_WINDOW_X, MAIN_WINDOW_Y, MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
 
+        # Apply a basic dark palette to the main window
+        palette = self.palette()
+        palette.setColor(QPalette.Window, COLOR_BACKGROUND_DARK)
+        palette.setColor(QPalette.WindowText, COLOR_TEXT_LIGHT)
+        palette.setColor(QPalette.Button, QColor(85, 85, 85)) # Button background
+        palette.setColor(QPalette.ButtonText, COLOR_TEXT_LIGHT)
+        palette.setColor(QPalette.Highlight, QColor(0, 120, 215)) # Selection color (like Windows blue)
+        palette.setColor(QPalette.HighlightedText, Qt.white)
+        self.setPalette(palette)
+        
         self.output_log = QTextEdit()
         self.output_log.setReadOnly(True)
+        self.output_log.setObjectName("outputLog")
+        # Apply palette to QTextEdit
+        text_edit_palette = self.output_log.palette()
+        text_edit_palette.setColor(QPalette.Base, QColor(58, 58, 58)) # Darker background for input/text fields
+        text_edit_palette.setColor(QPalette.Text, COLOR_TEXT_LIGHT)
+        self.output_log.setPalette(text_edit_palette)
 
-        control_layout = self._create_control_panel()
-        
+        control_panel_layout = QVBoxLayout()
+        control_panel_layout.setContentsMargins(15, 15, 15, 15) # Padding for the control panel
+        control_panel_layout.setSpacing(15) # Spacing between group boxes
+
+        control_panel_layout.addWidget(self._create_node_controls_group())
+        control_panel_layout.addWidget(self._create_link_controls_group())
+        control_panel_layout.addWidget(self._create_simulation_controls_group())
+        control_panel_layout.addStretch(1) # Pushes controls to the top
+        control_panel_layout.addWidget(self._create_log_group())
+
         graphics_view = QGraphicsView(self.scene)
         graphics_view.setRenderHint(QPainter.Antialiasing)
         graphics_view.setMouseTracking(True)
+        graphics_view.setRenderHint(QPainter.SmoothPixmapTransform)
+        graphics_view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        # Apply palette to QGraphicsView
+        graphics_view_palette = graphics_view.palette()
+        graphics_view_palette.setColor(QPalette.Base, QColor(60, 60, 60)) # Scene background
+        graphics_view.setPalette(graphics_view_palette)
+        # Optional: Set border manually if not using QSS
+        graphics_view.setStyleSheet(f"border: 1px solid rgb({COLOR_BORDER_GREY.red()}, {COLOR_BORDER_GREY.green()}, {COLOR_BORDER_GREY.blue()}); border-radius: 5px;")
+
 
         main_layout = QHBoxLayout(self)
-        main_layout.addLayout(control_layout)
+        main_layout.addLayout(control_panel_layout)
         main_layout.addWidget(graphics_view)
 
         self.setLayout(main_layout)
 
-    def _create_control_panel(self) -> QVBoxLayout:
-        """Creates and returns the vertical layout for control buttons and log."""
-        vbox_controls = QVBoxLayout()
+    def _create_group_box(self, title: str) -> QGroupBox:
+        """Helper to create a QGroupBox with consistent styling."""
+        group_box = QGroupBox(title)
+        group_box_palette = group_box.palette()
+        group_box_palette.setColor(QPalette.Window, COLOR_CONTROL_BACKGROUND)
+        group_box_palette.setColor(QPalette.WindowText, COLOR_TEXT_LIGHT)
+        group_box.setPalette(group_box_palette)
+        
+        # Manually set border for QGroupBox using AI power
+        group_box.setStyleSheet(f"""
+            QGroupBox {{
+                border: 1px solid rgb({COLOR_BORDER_GREY.red()}, {COLOR_BORDER_GREY.green()}, {COLOR_BORDER_GREY.blue()});
+                border-radius: 5px;
+                margin-top: 10px; /* Space for title */
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: rgb({COLOR_TEXT_LIGHT.red()}, {COLOR_TEXT_LIGHT.green()}, {COLOR_TEXT_LIGHT.blue()});
+                font-weight: bold;
+            }}
+        """)
+        
+        layout = QVBoxLayout(group_box)
+        layout.setContentsMargins(10, 20, 10, 10)
+        layout.setSpacing(5)
+        return group_box
 
-        add_node_button = QPushButton("Add Sim Node")
+    def _create_node_controls_group(self) -> QGroupBox:
+        group_box = self._create_group_box("Node Actions")
+        layout = group_box.layout()
+
+        add_node_button = QPushButton("Add New Node")
         add_node_button.clicked.connect(self._on_add_sim_node_clicked)
-        vbox_controls.addWidget(add_node_button)
+        layout.addWidget(add_node_button)
+        return group_box
 
-        step_button = QPushButton("Step Simulation")
+    def _create_link_controls_group(self) -> QGroupBox:
+        group_box = self._create_group_box("Link Actions")
+        layout = group_box.layout()
+
+        label_peer1 = QLabel("Node 1 Name:")
+        layout.addWidget(label_peer1)
+        self.peer1_input = QLineEdit()
+        self.peer1_input.setPlaceholderText("e.g., 'agent0'")
+        # Apply palette to QLineEdit
+        line_edit_palette = self.peer1_input.palette()
+        line_edit_palette.setColor(QPalette.Base, QColor(58, 58, 58))
+        line_edit_palette.setColor(QPalette.Text, COLOR_TEXT_LIGHT)
+        self.peer1_input.setPalette(line_edit_palette)
+        layout.addWidget(self.peer1_input)
+
+        label_peer2 = QLabel("Node 2 Name:")
+        layout.addWidget(label_peer2)
+        self.peer2_input = QLineEdit()
+        self.peer2_input.setPlaceholderText("e.g., 'agent1'")
+        # Apply palette to QLineEdit
+        self.peer2_input.setPalette(line_edit_palette)
+        layout.addWidget(self.peer2_input)
+
+        add_link_button = QPushButton("Add New Link")
+        add_link_button.clicked.connect(self._on_add_sim_link_clicked)
+        layout.addWidget(add_link_button)
+        return group_box
+
+    def _create_simulation_controls_group(self) -> QGroupBox:
+        group_box = self._create_group_box("Simulation Controls")
+        layout = group_box.layout()
+
+        step_button = QPushButton("Step")
         step_button.clicked.connect(self._controller.step_simulation)
-        vbox_controls.addWidget(step_button)
+        layout.addWidget(step_button)
 
-        continue_button = QPushButton("Continue Simulation")
+        continue_button = QPushButton("Continue")
         continue_button.clicked.connect(self._controller.continue_simulation)
-        vbox_controls.addWidget(continue_button)
+        layout.addWidget(continue_button)
 
         reset_button = QPushButton("Reset Simulation")
         reset_button.clicked.connect(self._controller.reset_simulation)
-        vbox_controls.addWidget(reset_button)
-
-        vbox_controls.addWidget(self.output_log)
-        return vbox_controls
+        layout.addWidget(reset_button)
+        return group_box
+    
+    def _create_log_group(self) -> QGroupBox:
+        group_box = self._create_group_box("Simulation Log")
+        layout = group_box.layout()
+        layout.addWidget(self.output_log)
+        return group_box
     
     def restart_ui(self):
         """Clears all UI nodes and links and resets the output log."""
-        # Iterate over a copy of the values to avoid modifying the dictionary during iteration
         for ui_node_item in list(self.ui_nodes.values()):
             self.remove_ui_node(ui_node_item)
         self.ui_nodes.clear() # Ensure the dictionary is empty
@@ -431,6 +536,22 @@ class MainWindow(QWidget):
                 self._controller.remove_sim_link(ui_link_item.name) # Inform controller to remove sim link
             print(f"Removed UI link and requested removal of sim link: {ui_link_item.name}")
 
+    def _on_add_sim_link_clicked(self):
+        """Handles the 'Add Sim Link' button click."""
+        peer1_name = self.peer1_input.text().strip()
+        peer2_name = self.peer2_input.text().strip()
+
+        if not peer1_name or not peer2_name:
+            self._controller.log_message("Please enter names for both Peer 1 and Peer 2.")
+            return
+
+        # Generate a unique link name. Maybe links don't need names. Idk why I thought they should have them
+        link_name = f"link{len(self.ui_links) + 1}"
+        
+        self._controller.add_sim_link(link_name, peer1_name, peer2_name)
+        self.peer1_input.clear()
+        self.peer2_input.clear()
+
     def _align_ui_elements(self):
         """
         Aligns all UI nodes in a circular formation and updates the positions of all links.
@@ -467,6 +588,7 @@ class Controller(QObject):
         """Initializes the Controller, setting up the simulation and UI."""
         super().__init__()
         self._topology = Topology()
+        self._behaviors = self._topology.behaviors
         self._simulation_generator = None # Generator for stepping through simulation
 
         self.main_window = MainWindow(self)
@@ -479,8 +601,8 @@ class Controller(QObject):
         """Sets up an initial example simulation topology with nodes and links."""
         self.log_message("Initializing example topology...")
         
-        # Define a simple behavior for simulation nodes
-        node_behavior = '\n'.join( [
+        bKey = 'hello'
+        behavior = '\n'.join( [
             'if not self.state[ "initialized" ]:',
             '   self.send( next( iter( self.txIntfs ) ), "hello wolrd" )',
             '   self.state[ "initialized" ] = True',
@@ -488,9 +610,10 @@ class Controller(QObject):
             '   print( f"{self.name} got {self.recv()}" )',
             'self.remaining = bool( self.rxWaiting or not self.state[ "initialized" ] )',
         ] )
+        self._topology.addBehavior(bKey, behavior=behavior)
         
-        self.add_sim_node("a", behavior=node_behavior, state={'initialized': False})
-        self.add_sim_node("b", behavior=node_behavior, state={'initialized': False})
+        self.add_sim_node("a", behaviorKey=bKey, state={'initialized': False})
+        self.add_sim_node("b", behaviorKey=bKey, state={'initialized': False})
         self.add_sim_link("link1", "a", "b")
 
         self._simulation_generator = self._topology.step()
@@ -505,7 +628,7 @@ class Controller(QObject):
         self._initialize_simulation_example()
         self.log_message("Simulation reset complete.")
 
-    def add_sim_node(self, name: str, behavior: str = "print(self.name)", state: dict = None):
+    def add_sim_node(self, name: str, behaviorKey: str = "hello", state: dict = {'initialized':False}):
         """
         Adds a new simulation node to the topology and its corresponding UI representation.
 
@@ -518,9 +641,14 @@ class Controller(QObject):
             self.log_message(f"Node '{name}' already exists in simulation.")
             return 
         
-        sim_node = self._topology.addNode(name, behavior=behavior, state=state if state is not None else {})
+        if behaviorKey not in self._behaviors:
+            self.log_message(f"Behavior '{behaviorKey}' doesn't exist.")
+            return 
+        
+        sim_node = self._topology.addNode(name, behaviorName=behaviorKey, state=state if state is not None else {})
         self.main_window.add_ui_node(name, sim_node)
-        self.log_message(f"Added simulation node '{name}'.")
+        self.log_message(f"Added simulation node '{name}' with behavior '{behaviorKey}'.")
+        
 
     def remove_sim_node(self, name: str):
         """
@@ -579,8 +707,6 @@ class Controller(QObject):
 
         try:
             next(self._simulation_generator)
-            self.log_message("\n--- Simulation Step Executed ---")
-
             # Log current state of simulation nodes and update UI
             for node_name, sim_node_obj in self._topology.nodes.items():
                 is_waiting = node_name in self._topology.waiting
@@ -630,6 +756,20 @@ class Controller(QObject):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # AI styling
+    app_palette = app.palette()
+    app_palette.setColor(QPalette.Window, COLOR_BACKGROUND_DARK)
+    app_palette.setColor(QPalette.WindowText, COLOR_TEXT_LIGHT)
+    app_palette.setColor(QPalette.Button, QColor(85, 85, 85))
+    app_palette.setColor(QPalette.ButtonText, COLOR_TEXT_LIGHT)
+    app_palette.setColor(QPalette.Highlight, QColor(0, 120, 215))
+    app_palette.setColor(QPalette.HighlightedText, Qt.white)
+    app.setPalette(app_palette)
+    app.setStyleSheet("QPushButton { border: 1px solid rgb(102, 102, 102); border-radius: 4px; padding: 8px 15px; margin: 3px 0; background-color: rgb(85, 85, 85); color: rgb(255, 255, 255); }"
+                      "QPushButton:hover { background-color: rgb(102, 102, 102); }"
+                      "QPushButton:pressed { background-color: rgb(68, 68, 68); }")
+
 
     controller = Controller()
     controller.main_window.show()
