@@ -146,6 +146,8 @@ class Topology:
          yield
 
 if __name__ == "__main__":
+   
+
    top = Topology()
    bKey = 'hello'
    behavior = '\n'.join( [
@@ -186,6 +188,28 @@ if __name__ == "__main__":
             'p, print: display state information'
             ], sep='\n' )
       elif cmd in ( 'p', 'print' ):
+         # TODO: specify small section to print:
+         #    node + name
+         #    link + name, name
+         #    behavior + name
          from simFile import dumpTopology
          print( dumpTopology( top ) )
+      # TODO commands to manipulate topology
+      # top/topo/topology
+      #    n, node: manipulate node, name
+      #       a, add: add node (state and behavior name)
+      #       r, remove: remove node (removes associated links as well)
+      #       s, set: set state value manually (key, value)
+      #       b, behavior: set behavior by name
+      #    l, link: manipulate links, name, name
+      #       a, add: add link (name, name)
+      #       r, remove: remove link (name, name)
+      #       m, message: manipulate messages
+      #          p, push: push message in
+      #          i, insert: add message at specific index
+      #          d, drop: remove message at specific index
+      # TODO file operations
+      # f, file: file tools
+      #    l, load: load from file path
+      #    d, dump: dump to file path
       lastCmd = cmd
