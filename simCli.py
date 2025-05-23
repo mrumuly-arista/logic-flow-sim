@@ -31,21 +31,27 @@ class SimShell( Cmd ):
    prompt = ':'
 
    def do_h( self, arg ):
+      'alias: help'
       self.do_help( arg )
    def do_man( self, arg ):
+      'alias: help'
       self.do_help( arg )
    def do_m( self, arg ):
+      'alias: help'
       self.do_help( arg )
 
    def do_continue( self, arg ):
+      'next as long as there is activity waiting'
       if arg:
          return
       for _ in loop:
          pass
    def do_c( self, arg ):
+      'alias: continue'
       self.do_continue (arg )
 
    def do_next( self, arg ):
+      'perform a number of steps, "next [STEPS=1]"'
       iters = int( arg ) if arg else 1
       for i in range( iters ):
          try:
@@ -54,20 +60,27 @@ class SimShell( Cmd ):
             print( f'job done in {i} steps' )
             break
    def do_n( self, arg ):
+      'alias: next'
       self.do_next( arg )
    def do_step( self, arg ):
+      'alias: next'
       self.do_next( arg )
    def do_s( self, arg ):
+      'alias: next'
       self.do_next( arg )
 
    def do_print( self, arg ):
+      'print current state of topology'
       print( dumpTopology( top ) )
    def do_p( self, arg ):
+      'alias: print'
       self.do_print( arg )
    def do_show( self, arg ):
+      'alias: print'
       self.do_print( arg )
 
    def do_file( self, arg ):
+      'Perform file operations: "file load PATH", "file dump PATH"'
       if not arg:
          return
       tokens = arg.split()
@@ -80,17 +93,22 @@ class SimShell( Cmd ):
       elif tokens[ 0 ] in ( 'd', 'dump' ):
          dumpTopologyFile( top, path )
    def do_f( self, arg ):
+      "alias: file"
       self.do_file( arg )
 
    def do_quit( self, arg ):
+      'terminate program'
       if arg:
          return
       return True
    def do_q( self, arg ):
+      'alias: quit'
       return self.do_quit( arg )
    def do_exit( self, arg ):
+      'alias: quit'
       return self.do_quit( arg )
    def do_e( self, arg ):
+      'alias: quit'
       return self.do_quit( arg )
       
    # TODO commands to manipulate topology
