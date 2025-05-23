@@ -57,18 +57,6 @@ COLOR_TEXT_LIGHT = QColor(240, 240, 240)
 COLOR_CONTROL_BACKGROUND = QColor(51, 51, 51) # For group boxes, etc.
 COLOR_BORDER_GREY = QColor(68, 68, 68)
 
-class QtOutputStream(QObject):
-    text_written = pyqtSignal(str)
-
-    def write(self, text):
-        self.text_written.emit(str(text))
-
-    def flush(self):
-        pass
-
-    def isatty(self):
-        return False
-
 class ToolTipWindow(QMainWindow):
     """
     A pop-up window to display and interact with the state of a simulation item (node or link).
@@ -89,6 +77,7 @@ class ToolTipWindow(QMainWindow):
         self._parent_item = parent_item
         self._item_name = item_name
         self._item_state = item_state if item_state is not None else {}
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
 
         self._setup_ui()
         self._update_state_display()
@@ -238,6 +227,9 @@ class UILink(QGraphicsLineItem):
         else:
             self.info_text_item.setPlainText("")
 
+        if self._detail_window and self._detail_window.isVisible():
+            self._update_tooltip()
+
     def _position_info_text(self):
         if not (self.start_node and self.end_node):
             return
@@ -264,7 +256,7 @@ class UILink(QGraphicsLineItem):
         self.setPen(current_pen)
         self.update()
 
-        if self._sim_link_ref1 and self._sim_link_ref2: # should all have two
+        if self._sim_link_ref1 and self._sim_link_ref2:
             combined_link_state = {
                 f"Forward ({self.start_node.name} -> {self.end_node.name})": self._sim_link_ref1.dump(),
                 f"Backward ({self.end_node.name} -> {self.start_node.name})": self._sim_link_ref2.dump()
@@ -276,6 +268,14 @@ class UILink(QGraphicsLineItem):
             print(f"Warning: UILink {self.name} has no associated SimLink(s).")
 
         super().mousePressEvent(event)
+    
+    def _update_tooltip(self):
+        if self._sim_link_ref1 and self._sim_link_ref2:
+            combined_link_state = {
+                f"Forward ({self.start_node.name} -> {self.end_node.name})": self._sim_link_ref1.dump(),
+                f"Backward ({self.end_node.name} -> {self.start_node.name})": self._sim_link_ref2.dump()
+            }
+            self._detail_window.update_item_state_display(combined_link_state)
 
 class UINode(QGraphicsEllipseItem):
     """
@@ -563,14 +563,13 @@ class MainWindow(QWidget):
             return
 
         if not (file_name_only.endswith(".yaml") or file_name_only.endswith(".yml")):
-            if "." in file_name_only: # if there's an extension already, append .yaml
+            if "." in file_name_only:
                 base, ext = os.path.splitext(file_name_only)
-                file_name_only = base + ext + ".yaml" # This might result in something like file.txt.yaml
-                file_name_only += ".yaml" # Simpler: just append if not already a YAML extension
-            else: # if no extension, assume .yaml
+                file_name_only += ".yaml"
+            else:
                 file_name_only += ".yaml"
         try:
-            base_save_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            base_save_dir = os.path.dirname(os.path.abspath(sys.argv[0])) 
         except:
             base_save_dir = os.getcwd()
 
@@ -785,13 +784,7 @@ class Controller(QObject):
         self._simulation_generator = None
 
         self.main_window = MainWindow(self)
-        # Connect controller's log signal to main window's log method
-        self._original_stdout = sys.stdout # Store original stdout
-        self._print_capture_stream = QtOutputStream()
-        self._print_capture_stream.text_written.connect(self.global_print_output_signal.emit)
-
         self.log_message_signal.connect(self.main_window.log_message)
-        # self.global_print_output_signal.connect(self.main_window.log_behavior_print_output)
 
     def load_topology(self, file):
         """Loads topology from yaml files"""
@@ -879,7 +872,6 @@ class Controller(QObject):
         except Exception as e:
             self.log_message(f"Failed to add link '{name}': {e}. Ensure nodes '{peer1_name}' and '{peer2_name}' exist.")
 
-
     def remove_sim_link(self, name: str):
         """
         Removes a simulation link from the topology.
@@ -901,14 +893,12 @@ class Controller(QObject):
             self.log_message("Simulation not initialized...") # Use self.log_message for controlled logging
             return
 
-        sys.stdout = self._print_capture_stream # Redirect global stdout
         try:
             next(self._simulation_generator)
-            self.log_message("\n--- Simulation Step Executed ---") # Goes to dedicated log
+            self.log_message("\n--- Simulation Step Executed ---")
 
             for node_name, sim_node_obj in self._topology.nodes.items():
                 is_waiting = node_name in self._topology.waiting
-                # This log_message goes to the dedicated simulation log
                 self.log_message(f"Node: {sim_node_obj.name}, State: {sim_node_obj.state}, Is waiting: {is_waiting}")
 
             self.main_window.update_ui_nodes()
@@ -920,8 +910,6 @@ class Controller(QObject):
         except Exception as e:
             self.log_message(f"Error during simulation step: {e}")
             self._simulation_generator = None
-        finally:
-            sys.stdout = self._original_stdout # Always restore global stdout
 
     def continue_simulation(self):
         """
